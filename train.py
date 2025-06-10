@@ -5,6 +5,7 @@ import torch
 import numpy as np
 from sklearn.metrics import accuracy_score, f1_score
 from transformers import DataCollatorWithPadding
+from transformers import EarlyStoppingCallback
 from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification,
@@ -12,28 +13,26 @@ from transformers import (
     Trainer,
 )
 
+from preprocess import load_data, preprocess
 
-# 파일 경로
-file_path = "data/dataset.txt"
-
-# 파일 읽기
-with open(file_path, "r", encoding="utf-8") as f:
-    lines = [line.strip() for line in f if line.strip()]
-
-# 각 줄을 "text|label" 형식으로 분리
-data = [line.rsplit("|", 1) for line in lines]
-
-# DataFrame 생성
-df = pd.DataFrame(data, columns=["text", "label"])
-df["label"] = df["label"].astype(int)
+model_name = "klue/bert-base"
+train_file_path = "data/dataset.txt"
+test_file_path = "validation.json"
+save_model_path = "trained_model/"
 
 
 # 1. Load data
-# df = df[:30000]
+with open(train_file_path, "r", encoding="utf-8") as f:
+    lines = [line.strip() for line in f if line.strip()]
+
+data = [line.rsplit("|", 1) for line in lines]
+
+df = pd.DataFrame(data, columns=["text", "label"])
+df["label"] = df["label"].astype(int)
 train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
 
+
 # 2. Tokenizer & Model
-model_name = "beomi/KcELECTRA-base"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2)
 
@@ -48,7 +47,6 @@ def tokenize(batch):
 train_dataset = Dataset.from_pandas(train_df).map(tokenize, batched=True)
 test_dataset = Dataset.from_pandas(test_df).map(tokenize, batched=True)
 
-# HuggingFace는 label 열을 int로 인식해야 함
 train_dataset = train_dataset.rename_column("label", "labels")
 test_dataset = test_dataset.rename_column("label", "labels")
 
@@ -85,11 +83,41 @@ trainer = Trainer(
     eval_dataset=test_dataset,
     compute_metrics=compute_metrics,
     data_collator=data_collator,
+    callbacks=[EarlyStoppingCallback(early_stopping_patience=2)],
 )
 
 # 7. Train!
 trainer.train()
 
 # 8. Save
-trainer.save_model("abuse_model/")
-tokenizer.save_pretrained("abuse_model/")
+trainer.save_model(save_model_path)
+tokenizer.save_pretrained(save_model_path)
+
+
+val_df = load_data(test_file_path)
+val_df = preprocess(val_df)
+
+new_texts = val_df["text"].to_list()
+new_labels = val_df["is_active"].to_list()
+
+model = model.to("cpu")
+
+# 토크나이징
+new_encodings = tokenizer(
+    new_texts, padding=True, truncation=True, return_tensors="pt", max_length=128
+)
+
+# 모델을 평가 모드로 전환하고 예측
+model.eval()
+with torch.no_grad():
+    outputs = model(**new_encodings)
+    logits = outputs.logits
+    preds = torch.argmax(logits, dim=1).cpu().numpy()
+
+# print("📌 예측 결과:", preds)
+
+if new_labels:
+    acc = accuracy_score(new_labels, preds)
+    f1 = f1_score(new_labels, preds)
+    print(f"✅ Accuracy: {acc:.4f}")
+    print(f"✅ F1 Score: {f1:.4f}")
