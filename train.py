@@ -1,28 +1,26 @@
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from datasets import Dataset
-import torch
 import numpy as np
 from sklearn.metrics import accuracy_score, f1_score
-from transformers import DataCollatorWithPadding
-from transformers import EarlyStoppingCallback
 from transformers import (
+    DataCollatorWithPadding,
+    EarlyStoppingCallback,
     AutoTokenizer,
     AutoModelForSequenceClassification,
     TrainingArguments,
     Trainer,
 )
 
-from preprocess import load_data, preprocess
-
-model_name = "klue/bert-base"
-train_file_path = "data/dataset.txt"
-test_file_path = "validation.json"
-save_model_path = "trained_model/"
+from settings import (
+    TRAIN_FILE_PATH,
+    HF_MODEL_NAME,
+    SAVE_MODEL_PATH,
+)
 
 
 # 1. Load data
-with open(train_file_path, "r", encoding="utf-8") as f:
+with open(TRAIN_FILE_PATH, "r", encoding="utf-8") as f:
     lines = [line.strip() for line in f if line.strip()]
 
 data = [line.rsplit("|", 1) for line in lines]
@@ -33,8 +31,8 @@ train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
 
 
 # 2. Tokenizer & Model
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2)
+tokenizer = AutoTokenizer.from_pretrained(HF_MODEL_NAME)
+model = AutoModelForSequenceClassification.from_pretrained(HF_MODEL_NAME, num_labels=2)
 
 
 # 3. Tokenize function
@@ -90,34 +88,5 @@ trainer = Trainer(
 trainer.train()
 
 # 8. Save
-trainer.save_model(save_model_path)
-tokenizer.save_pretrained(save_model_path)
-
-
-val_df = load_data(test_file_path)
-val_df = preprocess(val_df)
-
-new_texts = val_df["text"].to_list()
-new_labels = val_df["is_active"].to_list()
-
-model = model.to("cpu")
-
-# 토크나이징
-new_encodings = tokenizer(
-    new_texts, padding=True, truncation=True, return_tensors="pt", max_length=128
-)
-
-# 모델을 평가 모드로 전환하고 예측
-model.eval()
-with torch.no_grad():
-    outputs = model(**new_encodings)
-    logits = outputs.logits
-    preds = torch.argmax(logits, dim=1).cpu().numpy()
-
-# print("📌 예측 결과:", preds)
-
-if new_labels:
-    acc = accuracy_score(new_labels, preds)
-    f1 = f1_score(new_labels, preds)
-    print(f"✅ Accuracy: {acc:.4f}")
-    print(f"✅ F1 Score: {f1:.4f}")
+trainer.save_model(SAVE_MODEL_PATH)
+tokenizer.save_pretrained(SAVE_MODEL_PATH)
