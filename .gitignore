@@ -1,2 +1,8 @@
+# Data
 results
-validation.json
+raw.json
+
+# Env
+.env
+
+__pycache__
